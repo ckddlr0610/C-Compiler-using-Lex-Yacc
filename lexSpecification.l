@@ -1,21 +1,24 @@
 digit [0-9]
-letter [a-zA-z_]
+letter [a-zA-Z_]
 delim [\t]
 line [\n]
 ws {delim}+
+
 %{
+#define YYSTYPE_IS_DECLARED 1
+
+typedef long YYSTYPE;
+
 #include "y.tab.h"
 #include "type.h"
-#include "stdio.h"
-
-extern int vvlval;
+extern int line_no;
 extern A_ID *current_id;
-char *makeString(char *);
+char *makeString();
 int checkIdentifier();
 %}
 %%
 {ws}    { }
-{line}    { }
+{line}    {line_no++;}
 auto    {return(AUTO_SYM);}
 break   {return(BREAK_SYM);}
 case   {return(CASE_SYM);}
@@ -26,7 +29,7 @@ else   {return(ELSE_SYM);}
 enum   {return(ENUM_SYM);}
 for   {return(FOR_SYM);}
 if   {return(IF_SYM);}
-return   {return(IF_SYM);}
+return   {return(RETURN_SYM);}
 sizeof   {return(SIZEOF_SYM);}
 static   {return(STATIC_SYM);}
 struct   {return(STRUCT_SYM);}
@@ -34,10 +37,10 @@ switch   {return(SWITCH_SYM);}
 typedef   {return(TYPEDEF_SYM);}
 union   {return(UNION_SYM);}
 while   {return(WHILE_SYM);}
-"\++"   {return(PLUSPLUS);}
-"\--"   {return(MINUSMINUS);}
+"\+\+"   {return(PLUSPLUS);}
+"\-\-"   {return(MINUSMINUS);}
 "\->"   {return(ARROW);}
-"\<"   {return(LSS);}
+"\<"    {return(LSS);}
 "\>"   {return(GTR);}
 "\<="   {return(LEQ);}
 "\>="   {return(GEQ);}
@@ -45,7 +48,7 @@ while   {return(WHILE_SYM);}
 "\!="   {return(NEQ);}
 "\&&"   {return(AMPAMP);}
 "\||"   {return(BARBAR);}
-"\..."   {return(DOTDOTDOT);}
+"\.\.\."   {return(DOTDOTDOT);}
 "\("   {return(LP);}
 "\)"   {return(RP);}
 "\["   {return(LB);}
@@ -72,6 +75,10 @@ while   {return(WHILE_SYM);}
 \'([^'\n]|\'\')\'  { yylval=*(yytext+1); return(CHARACTER_CONSTANT);}
 "//"[^\n]*  {}
 %%
+
+int yywrap() {
+    return 1;
+}
 
 char *makeString(char *s) {
     char *t;

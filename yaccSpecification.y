@@ -1,11 +1,23 @@
 %{
-#include "stdio.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include "type.h"
+#define YYSTYPE_IS_DECLARED 1
 
+typedef long YYSTYPE;
+
+extern A_ID *current_id;
+extern int line_no;
+extern int current_level;
+extern int syntax_err;
+extern A_ID *root;
+extern A_TYPE *int_type;
+
+int yylex();
 void yyerror(char *s);
 void print_ast(A_NODE *);
-A_NODE *makeNode(NODE_NAME n, A_NODE *a, A_NODE *b, A_NODE *c);
-A_NODE *makeNodeList(NODE_NAME n, A_NODE *a, A_NODE *b);
+A_NODE *makeNode(NODE_NAME, A_NODE *, A_NODE *, A_NODE *);
+A_NODE *makeNodeList(NODE_NAME, A_NODE *, A_NODE *);
 A_ID *makeIdentifier(char *s);
 A_ID *makeDummyIdentifier();
 A_TYPE *makeType(T_KIND k);
@@ -33,11 +45,6 @@ A_TYPE *setTypeAndKindOfDeclarator(A_TYPE *t, ID_KIND k, A_ID *id);
 A_TYPE *setTypeNameSpecifier(A_TYPE *, A_SPECIFIER *);
 void syntax_error(int i, char *s); 
 void initialize();
-extern A_ID *current_id;
-extern int current_level;
-extern int syntax_err;
-extern A_ID *root;
-extern A_TYPE *int_type;
 %}
 
 %start program
@@ -52,7 +59,7 @@ extern A_TYPE *int_type;
     BREAK_SYM RETURN_SYM SWITCH_SYM CASE_SYM DEFAULT_SYM DOT
 %%
 program
-    :translation_unit   {checkForwardReference(); root=makeNode(N_PROGRAM,$1,0,0);}
+    :translation_unit   {root=makeNode(N_PROGRAM,NIL,$1,NIL); checkForwardReference();}
     ;
 
 translation_unit
@@ -70,10 +77,6 @@ function_definition
     |declarator {$$=setFunctionDeclaratorSpecifier($1,makeSpecifier(int_type,0));} compound_statement {$$=setFunctionDeclaratorBody($2,$3);}
     ;
 
-declaration
-    : declaration_specifiers init_declarator_list_opt SEMICOLON {$$=setDeclaratorListSpecifier($2,$1);}
-    ;
-
 declaration_list_opt
     :   {$$=$0;}
     | declaration_list  {$$=$1;}
@@ -82,6 +85,10 @@ declaration_list_opt
 declaration_list
     :declaration    {$$=$1;}
     |declaration_list declaration   {$$=linkDeclaratorList($1,$2);}
+    ;
+
+declaration
+    : declaration_specifiers init_declarator_list_opt SEMICOLON {$$=setDeclaratorListSpecifier($2,$1);}
     ;
 
 declaration_specifiers
@@ -97,19 +104,29 @@ storage_class_specifier
     |TYPEDEF_SYM    {$$=S_TYPEDEF;};
     ;
 
-init_declarator_list
-    :init_declarator    {$$=$1;}
-    |init_declarator_list COMMA init_declarator {$$=linkDeclaratorList($1,$3);}
-    ;
-
 init_declarator_list_opt
     :   {$$=makeDummyIdentifier();}
     | init_declarator_list  {$$=$1;}
     ;
 
+init_declarator_list
+    :init_declarator    {$$=$1;}
+    |init_declarator_list COMMA init_declarator {$$=linkDeclaratorList($1,$3);}
+    ;
+
 init_declarator
     :declarator {$$=$1;}
     |declarator ASSIGN initializer  {$$=setDeclaratorInit($1,$3);}
+    ;
+
+initializer
+    :constant_expression    {$$=makeNode(N_INIT_LIST_ONE,NIL,$1,NIL);}
+    |LR initializer_list RR {$$=$2;}
+    ;
+
+initializer_list
+    :initializer    {$$=makeNode(N_INIT_LIST,$1,0,makeNode(N_INIT_LIST_NIL,NIL,NIL,NIL));}
+    |initializer_list COMMA initializer {$$=makeNodeList(N_INIT_LIST,$1,$3);}
     ;
 
 type_specifier
@@ -120,9 +137,9 @@ type_specifier
 
 struct_specifier
     :struct_or_union IDENTIFIER {$$=setTypeStructOrEnumIdentifier($1,$2,ID_STRUCT);} LR {$$=current_id; current_level++;} struct_declaration_list 
-    RR {checkForwardReference(); $$=setTypeField($3,$4); current_level--; current_id=$5;}
+    RR {checkForwardReference(); $$=setTypeField($3,$6); current_level--; current_id=$5;}
         | struct_or_union {$$=makeType($1);} LR {$$=current_id; current_level++;} struct_declaration_list 
-        RR {checkForwardReference(); $$=setTypeField($2,$4); current_level--; current_id=$3;}
+        RR {checkForwardReference(); $$=setTypeField($2,$5); current_level--; current_id=$4;}
         | struct_or_union IDENTIFIER {$$=getTypeOfStructOrEnumIdentifier($1,$2,ID_STRUCT);}
         ;
 
@@ -141,7 +158,7 @@ struct_declaration
     ;
 
 struct_declarator_list
-    :struct_declarator_list SEMICOLON struct_declarator {$$=linkDeclaratorList($1,$2);}
+    :struct_declarator_list SEMICOLON struct_declarator {$$=linkDeclaratorList($1,$3);}
     |struct_declarator  {$$=$1;}
     ;
 
@@ -178,24 +195,19 @@ pointer
 direct_declarator
     :IDENTIFIER {$$=makeIdentifier($1);}
     |LP declarator RP   {$$=$2;}
-    |direct_declarator LB constant_expression_opt RB    {$$=setDeclaratorElementType($1,setTypeExpr(makeType(T_ARRAY), $3));}
+    |direct_declarator LB constant_expression_opt RB 
+    {$$=setDeclaratorElementType($1,setTypeExpr(makeType(T_ARRAY), $3));}
     |direct_declarator LP {$$=current_id; current_level++;} parameter_type_list_opt 
-    RP {checkForwardReference(); current_level--; current_id=$3; $$=setDeclaratorElementType($1,setTypeField(makeType(T_FUNC), $3));}
-    ;
-
-constant_expression_opt
-    :
-    |constant_expression
+    RP {checkForwardReference(); current_id=$3; current_level--; $$=setDeclaratorElementType($1,setTypeField(makeType(T_FUNC), $4));}
     ;
 
 parameter_type_list_opt
     :   {$$=NIL;}
     |parameter_type_list    {$$=$1;}
-    ;
 
 parameter_type_list
     :parameter_list {$$=$1;}
-    |parameter_list DOTDOTDOT   {$$=linkDeclaratorList($1,setDeclaratorKind(makeDummyIdentifier(), ID_PARM));}
+    |parameter_list COMMA DOTDOTDOT   {$$=linkDeclaratorList($1,setDeclaratorKind(makeDummyIdentifier(), ID_PARM));}
     ;
 
 parameter_list
@@ -226,14 +238,14 @@ direct_abstract_declarator
     |direct_abstract_declarator LP parameter_type_list_opt RP   {$$=setTypeElementType($1,setTypeExpr(makeType(T_FUNC),$3));}
     ;
 
-initializer
-    :constant_expression    {$$=makeNode(N_INIT_LIST_ONE,NIL,$1,NIL);}
-    |LR initializer_list RR {$$=$2;}
+statement_list_opt
+    :   {$$=makeNode(N_STMT_LIST_NIL,0,0,0);}
+    | statement_list   {$$=$1;}
     ;
 
-initializer_list
-    :initializer    {$$=makeNode(N_INIT_LIST,$1,0,makeNode(N_INIT_LIST_NIL,NIL,NIL,NIL));}
-    |initializer_list COMMA initializer {$$=makeNodeList(N_INIT_LIST,$1,$3);}
+statement_list
+    : statement  {$$=makeNode(N_STMT_LIST,$1,00,makeNode(N_STMT_LIST_NIL,0,0,0));}
+    | statement_list statement   {$$=makeNodeList(N_STMT_LIST,$1,$2);}
     ;
 
 statement
@@ -253,16 +265,6 @@ labeled_statement
 compound_statement
     : LR {$$=current_id; current_level++;} declaration_list_opt statement_list_opt RR
      {checkForwardReference(); $$=makeNode(N_STMT_COMPOUND,$3,0,$4); current_id=$2; current_level--;}
-    ;
-
-statement_list_opt
-    :   {$$=makeNode(N_STMT_LIST_NIL,0,0,0);}
-    | statement_list   {$$=$1;}
-    ;
-
-statement_list
-    : statement  {$$=makeNode(N_STMT_LIST,$1,0,makeNode(N_STMT_LIST_NIL,0,0,0));}
-    | statement_list statement   {$$=makeNodeList(N_STMT_LIST,$1,$2);}
     ;
 
 expression_statement
@@ -298,25 +300,6 @@ jump_statement
     |BREAK_SYM SEMICOLON    {$$=makeNode(N_STMT_BREAK,0,0,0);}
     ;
 
-primary_expression
-    :IDENTIFIER {$$=makeNode(N_EXP_IDENT,0,getIdentifierDeclared($1),0);}
-    |INTEGER_CONSTANT   {$$=makeNode(N_EXP_INT_CONST,0,$1,0);}
-    |FLOAT_CONSTANT {$$=makeNode(N_EXP_FLOAT_CONST,0,$1,0);}
-    |CHARACTER_CONSTANT {$$=makeNode(N_EXP_CHAR_CONST,0,$1,0);}
-    |STRING_LITERAL {$$=makeNode(N_EXP_STRING_LITERAL,0,$1,0);}
-    |LP expression RP   {$$=$2;}
-    ;
-
-postfix_expression
-    :primary_expression {$$=$1;}
-    |postfix_expression LB expression RB    {$$=makeNode(N_EXP_ARRAY,$1,0,$3);}
-    |postfix_expression LP arg_expression_list_opt RP   {$$=makeNode(N_EXP_FUNCTION_CALL,$1,0,$3);}
-    |postfix_expression DOT IDENTIFIER  {$$=makeNode(N_EXP_STRUCT,$1,0,$3);}
-    |postfix_expression ARROW IDENTIFIER    {$$=makeNode(N_EXP_ARROW,$1,0,$3);}
-    |postfix_expression PLUSPLUS    {$$=makeNode(N_EXP_POST_INC,0,$1,0);}
-    |postfix_expression MINUSMINUS  {$$=makeNode(N_EXP_POST_DEC,0,$1,0);}
-    ;
-
 arg_expression_list_opt
     :   {$$=makeNode(N_ARG_LIST_NIL,0,0,0);}
     |arg_expression_list    {$$=$1;}
@@ -325,6 +308,90 @@ arg_expression_list_opt
 arg_expression_list
     :assignment_expression  {$$=makeNode(N_ARG_LIST,$1,0,makeNode(N_ARG_LIST_NIL,0,0,0));}
     |arg_expression_list COMMA assignment_expression    {$$=makeNodeList(N_ARG_LIST,$1,$3);}
+    ;
+
+constant_expression_opt
+    :   {$$=NIL;}
+    |constant_expression    {$$=$1;}
+    ;
+
+constant_expression
+    :expression  {$$=$1;}
+    ;
+
+expression
+    :comma_expression {$$=$1;}
+    ;
+
+comma_expression
+    :assignment_expression {$$=$1;}
+    ;
+
+assignment_expression
+    :conditional_expression {$$=$1;}
+    |unary_expression ASSIGN expression {$$=makeNode(N_EXP_ASSIGN,$1,0,$3);}
+    ;
+
+conditional_expression
+    :logical_or_expression {$$=$1;}
+    ;
+
+logical_and_expression
+    :bitwise_or_expression    {$$=$1;}
+    |logical_and_expression AMPAMP bitwise_or_expression  {$$=makeNode(N_EXP_AND,$1,0,$3);}
+    ;
+
+logical_or_expression
+    :logical_and_expression {$$=$1;}
+    |logical_or_expression BARBAR logical_and_expression    {$$=makeNode(N_EXP_OR,$1,0,$3);}
+    ;
+
+bitwise_or_expression
+    : bitwise_xor_expression    {$$=$1;}
+    ;
+
+bitwise_xor_expression
+    : bitwise_and_expression    {$$=$1;}
+    ;
+
+bitwise_and_expression
+    : equality_expression   {$$=$1;}
+    ;
+
+equality_expression
+    :relational_expression  {$$=$1;}
+    |equality_expression EQL relational_expression  {$$=makeNode(N_EXP_EQL,$1,0,$3);}
+    |equality_expression NEQ relational_expression  {$$=makeNode(N_EXP_NEQ,$1,0,$3);}
+    ;
+
+relational_expression
+    :shift_expression    {$$=$1;}
+    |relational_expression LSS shift_expression  {$$=makeNode(N_EXP_LSS,$1,0,$3);}
+    |relational_expression GTR shift_expression  {$$=makeNode(N_EXP_GTR,$1,0,$3);}
+    |relational_expression LEQ shift_expression  {$$=makeNode(N_EXP_LEQ,$1,0,$3);}
+    |relational_expression GEQ shift_expression  {$$=makeNode(N_EXP_GEQ,$1,0,$3);}
+    ;
+
+shift_expression
+    : additive_expression   {$$=$1;}
+    ;
+
+additive_expression
+    :multiplicative_expression  {$$=$1;}
+    |additive_expression PLUS multiplicative_expression {$$=makeNode(N_EXP_ADD,$1,0,$3);}
+    |additive_expression MINUS multiplicative_expression    {$$=makeNode(N_EXP_SUB,$1,0,$3);}
+    ;
+
+multiplicative_expression
+    :cast_expression    {$$=$1;}
+    |multiplicative_expression STAR cast_expression {$$=makeNode(N_EXP_MUL,$1,0,$3);}
+    |multiplicative_expression SLASH cast_expression    {$$=makeNode(N_EXP_DIV,$1,0,$3);}
+    |multiplicative_expression PERCENT cast_expression  {$$=makeNode(N_EXP_MOD,$1,0,$3);}
+    ;
+
+cast_expression
+    :unary_expression   {$$=$1;}
+    |LP type_name RP cast_expression    {$$=makeNode(N_EXP_CAST,$2,0,$4);}
     ;
 
 unary_expression
@@ -336,89 +403,51 @@ unary_expression
     |EXCL cast_expression   {$$=makeNode(N_EXP_NOT,0,$2,0);}
     |MINUS cast_expression  {$$=makeNode(N_EXP_MINUS,0,$2,0);}
     |PLUS cast_expression   {$$=makeNode(N_EXP_PLUS,0,$2,0);}
-    |SIZEOF_SYM unary_expression    {$$=makeNode(N_EXP_SIZE_EXP,$2,0,0);}
-    |SIZEOF_SYM LP type_name RP {$$=makeNode(N_EXP_SIZE_TYPE,$3,0,0);}
+    |SIZEOF_SYM unary_expression    {$$=makeNode(N_EXP_SIZE_EXP,0,$2,0);}
+    |SIZEOF_SYM LP type_name RP {$$=makeNode(N_EXP_SIZE_TYPE,0,$3,0);}
     ;
 
-cast_expression
-    :unary_expression   {$$=$1;}
-    |LP type_name RP cast_expression    {$$=makeNode(N_EXP_CAST,$2,$4,0);}
+postfix_expression
+    :primary_expression {$$=$1;}
+    |postfix_expression LB expression RB    {$$=makeNode(N_EXP_ARRAY,$1,0,$3);}
+    |postfix_expression LP arg_expression_list_opt RP   {$$=makeNode(N_EXP_FUNCTION_CALL,$1,0,$3);}
+    |postfix_expression PERIOD IDENTIFIER  {$$=makeNode(N_EXP_STRUCT,$1,0,$3);}
+    |postfix_expression ARROW IDENTIFIER    {$$=makeNode(N_EXP_ARROW,$1,0,$3);}
+    |postfix_expression PLUSPLUS    {$$=makeNode(N_EXP_POST_INC,0,$1,0);}
+    |postfix_expression MINUSMINUS  {$$=makeNode(N_EXP_POST_DEC,0,$1,0);}
+    ;
+
+primary_expression
+    :IDENTIFIER {$$=makeNode(N_EXP_IDENT,0,getIdentifierDeclared($1),0);}
+    |INTEGER_CONSTANT   {$$=makeNode(N_EXP_INT_CONST,0,$1,0);}
+    |FLOAT_CONSTANT {$$=makeNode(N_EXP_FLOAT_CONST,0,$1,0);}
+    |CHARACTER_CONSTANT {$$=makeNode(N_EXP_CHAR_CONST,0,$1,0);}
+    |STRING_LITERAL {$$=makeNode(N_EXP_STRING_LITERAL,0,$1,0);}
+    |LP expression RP   {$$=$2;}
     ;
 
 type_name
     :declaration_specifiers abstract_declarator_opt {$$=setTypeNameSpecifier($2,$1);}
     ;
-
-multiplicative_expression
-    :cast_expression    {$$=$1;}
-    |multiplicative_expression STAR cast_expression {$$=makeNode(N_EXP_MUL,$1,0,$3);}
-    |multiplicative_expression SLASH cast_expression    {$$=makeNode(N_EXP_DIV,$1,0,$3);}
-    |multiplicative_expression PERCENT cast_expression  {$$=makeNode(N_EXP_MOD,$1,0,$3);}
-    ;
-
-additive_expression
-    :multiplicative_expression  {$$=$1;}
-    |additive_expression PLUS multiplicative_expression {$$=makeNode(N_EXP_ADD,$1,0,$3);}
-    |additive_expression MINUS multiplicative_expression    {$$=makeNode(N_EXP_SUB,$1,0,$3);}
-    ;
-
-relational_expression
-    :additive_expression    {$$=$1;}
-    |relational_expression LSS additive_expression  {$$=makeNode(N_EXP_LSS,$1,0,$3);}
-    |relational_expression GTR additive_expression  {$$=makeNode(N_EXP_GTR,$1,0,$3);}
-    |relational_expression LEQ additive_expression  {$$=makeNode(N_EXP_LEQ,$1,0,$3);}
-    |relational_expression GEQ additive_expression  {$$=makeNode(N_EXP_GEQ,$1,0,$3);}
-    ;
-
-equality_expression
-    :relational_expression  {$$=$1;}
-    |equality_expression EQL relational_expression  {$$=makeNode(N_EXP_EQL,$1,0,$3);}
-    |equality_expression NEQ relational_expression  {$$=makeNode(N_EXP_NEQ,$1,0,$3);}
-    ;
-
-logical_and_expression
-    :equality_expression    {$$=$1;}
-    |logical_and_expression AMPAMP equality_expression  {$$=makeNode(N_EXP_AND,$1,0,$3);}
-    ;
-
-logical_or_expression
-    :logical_and_expression {$$=$1;}
-    |logical_or_expression BARBAR logical_and_expression    {$$=makeNode(N_EXP_OR,$1,0,$3);}
-    ;
-
-constant_expression
-    :logical_or_expression  {$$=$1;}
-    ;
-
-expression
-    :constant_expression    {$$=$1;}
-    |unary_expression ASSIGN expression {$$=makeNode(N_EXP_ASSIGN,$1,0,$3);}
-    ;
-
-assignment_expression
-    :logical_or_expression
-    |unary_expression ASSIGN expression
-    ;
 %%
 
-#include "lex.yy.c"
 extern char *yytext;
+extern FILE* yyin;
 
 void yyerror(char *s)
-{
-    printf("%s : error near %s\n", s, yytext);
+{   
+    syntax_err++;
+    printf("line %d: %s near %s\n", line_no, s, yytext);
 }
 
-void yywrap() {
-    return;
-}
-
-int main() {
+int main(int argc, char *argv[]) {
     initialize();
-    yyin = fopen("test.c", "r");
+    yyin = fopen(argv[1], "r");
     yyparse();
+
     if (syntax_err==0)
-	print_ast(root);
+	    print_ast(root);
+
     fclose(yyin);
     return 0;
 }
