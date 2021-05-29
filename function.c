@@ -178,8 +178,6 @@ void checkForwardReference() {
     id = current_id;
     while (id)
     {
-        printf("level : %d name: %s kind: %d currentLevel: %d\n",
-         id->level, id->name, id->kind, current_level);
         if (id->level<current_level)
         {
             break;
